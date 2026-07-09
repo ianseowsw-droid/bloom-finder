@@ -3,13 +3,9 @@ import { AppShell } from "@/components/AppShell";
 import { useRef, useState } from "react";
 import { Camera, Crosshair, MapPin, Sparkles, X, ImagePlus, RotateCcw } from "lucide-react";
 import { addSpecimen } from "@/lib/collection";
-import { plants } from "@/lib/plants";
-import {
-  formatCoords,
-  getCurrentFieldLocation,
-  type FieldLocation,
-} from "@/lib/location";
+import { formatCoords, getCurrentFieldLocation, type FieldLocation } from "@/lib/location";
 import { isSupabaseConfigured } from "@/lib/supabase";
+import { consumeQuota, getRemainingToday, DAILY_FREE_LIMIT } from "@/lib/quota";
 
 export const Route = createFileRoute("/capture")({
   head: () => ({
@@ -17,7 +13,8 @@ export const Route = createFileRoute("/capture")({
       { title: "Capture · Florist.ar" },
       {
         name: "description",
-        content: "Photograph a flower or plant, press it onto archival paper, and name your specimen.",
+        content:
+          "Photograph a flower or plant, press it onto archival paper, and name your specimen.",
       },
     ],
   }),
@@ -25,6 +22,16 @@ export const Route = createFileRoute("/capture")({
 });
 
 type Phase = "idle" | "preview" | "processing" | "naming" | "error";
+
+type Identification = {
+  identified: boolean;
+  commonName: string | null;
+  latinName: string | null;
+  confidence: number;
+  color: string | null;
+  habitat: string | null;
+  funFact: string | null;
+};
 
 function fileToDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -38,6 +45,7 @@ function fileToDataURL(file: File): Promise<string> {
 function Capture() {
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
+  const identifyRef = useRef<Promise<Identification | null> | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [original, setOriginal] = useState<string | null>(null);
   const [pressed, setPressed] = useState<string | null>(null);
@@ -49,6 +57,9 @@ function Capture() {
   const [color, setColor] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [identification, setIdentification] = useState<Identification | null>(null);
+  const [identifying, setIdentifying] = useState(false);
+  const [remaining, setRemaining] = useState(() => getRemainingToday());
 
   function reset() {
     setOriginal(null);
@@ -61,15 +72,54 @@ function Capture() {
     setColor("");
     setNotes("");
     setError(null);
+    setIdentification(null);
+    setIdentifying(false);
+    identifyRef.current = null;
+    setRemaining(getRemainingToday());
     setPhase("idle");
+  }
+
+  async function identify(dataUrl: string): Promise<Identification | null> {
+    setIdentifying(true);
+    try {
+      const res = await fetch("/api/identify-plant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: dataUrl }),
+      });
+      if (!res.ok) throw new Error("Identification failed");
+      const data = (await res.json()) as Identification;
+      setIdentification(data);
+      return data;
+    } catch {
+      setIdentification(null);
+      return null;
+    } finally {
+      setIdentifying(false);
+    }
   }
 
   async function onFile(file: File) {
     try {
       const dataUrl = await fileToDataURL(file);
+
+      if (!consumeQuota()) {
+        setRemaining(0);
+        setError(
+          `You've used your ${DAILY_FREE_LIMIT} free identifications for today. Come back tomorrow, or upgrade for unlimited.`,
+        );
+        setPhase("error");
+        return;
+      }
+      setRemaining(getRemainingToday());
+
       setOriginal(dataUrl);
       setPressed(null);
+      setIdentification(null);
       setPhase("preview");
+      // Kicked off now so it's often already done by the time the user
+      // taps "Press specimen" — press() awaits this same promise below.
+      identifyRef.current = identify(dataUrl);
     } catch {
       setError("Couldn't read that image.");
       setPhase("error");
@@ -81,6 +131,21 @@ function Capture() {
     setPhase("processing");
     setError(null);
     try {
+      const idResult = identifyRef.current ? await identifyRef.current : identification;
+      if (!idResult || !idResult.identified) {
+        setError(
+          "We couldn't recognize this plant. Try a clearer, closer photo of a single flower.",
+        );
+        setPhase("error");
+        return;
+      }
+
+      // Prefill from the identification — the user can still edit before saving.
+      setName(idResult.commonName ?? "");
+      setLatin(idResult.latinName ?? "");
+      if (idResult.color) setColor(idResult.color);
+      if (idResult.habitat) setHabitat(idResult.habitat);
+
       const res = await fetch("/api/remove-background", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -138,9 +203,7 @@ function Capture() {
 
       <main className="flex-1 px-6 pb-8">
         {phase === "idle" && (
-          <IdleView
-            onPick={() => fileRef.current?.click()}
-          />
+          <IdleView onPick={() => fileRef.current?.click()} remaining={remaining} />
         )}
 
         {(phase === "preview" || phase === "processing") && original && (
@@ -162,6 +225,7 @@ function Capture() {
             habitat={habitat}
             color={color}
             notes={notes}
+            identification={identification}
             onName={setName}
             onLatin={setLatin}
             onFoundAt={setFoundAt}
@@ -181,7 +245,7 @@ function Capture() {
               onClick={reset}
               className="mt-5 bg-forest text-bone px-5 py-3 rounded-2xl text-xs font-semibold uppercase tracking-wider"
             >
-              Try again
+              {remaining === 0 ? "Got it" : "Try again"}
             </button>
           </div>
         )}
@@ -203,19 +267,45 @@ function Capture() {
   );
 }
 
-function IdleView({ onPick }: { onPick: () => void }) {
+function IdleView({ onPick, remaining }: { onPick: () => void; remaining: number }) {
+  if (remaining <= 0) {
+    return (
+      <div className="mt-4">
+        <div className="rounded-3xl bg-bone p-7 border border-forest/5 shadow-sm text-center">
+          <span className="text-[10px] uppercase tracking-[0.2em] font-semibold text-moss/60">
+            Daily limit reached
+          </span>
+          <h2 className="font-serif text-3xl font-bold italic leading-tight mt-1">
+            That's {DAILY_FREE_LIMIT} for today.
+          </h2>
+          <p className="mt-3 text-sm text-moss/80 leading-relaxed">
+            You've used today's free identifications. Come back tomorrow, or upgrade for unlimited
+            plant ID.
+          </p>
+          <button
+            disabled
+            className="mt-7 w-full bg-forest/40 text-bone py-5 rounded-2xl font-semibold text-sm tracking-[0.15em] uppercase flex items-center justify-center gap-2"
+          >
+            <Camera className="size-5" strokeWidth={1.75} />
+            Open camera
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mt-4">
       <div className="rounded-3xl bg-bone p-7 border border-forest/5 shadow-sm">
         <span className="text-[10px] uppercase tracking-[0.2em] font-semibold text-moss/60">
-          Step one
+          Step one · {remaining} of {DAILY_FREE_LIMIT} free today
         </span>
         <h2 className="font-serif text-3xl font-bold italic leading-tight mt-1">
           Photograph a living specimen.
         </h2>
         <p className="mt-3 text-sm text-moss/80 leading-relaxed">
-          Frame a single flower or plant in good light. We'll lift it cleanly from
-          its surroundings and press it into your journal.
+          Frame a single flower or plant in good light. We'll identify it, lift it cleanly from its
+          surroundings, and press it into your journal.
         </p>
 
         <button
@@ -237,13 +327,11 @@ function IdleView({ onPick }: { onPick: () => void }) {
       <ol className="mt-8 space-y-4 text-sm text-moss/80">
         {[
           "Capture or upload a photo of the plant.",
-          "We separate the specimen from its background.",
-          "Name it, add field notes, and press it into your herbarium.",
+          "We identify the species and separate it from its background.",
+          "Confirm the name, add field notes, and press it into your herbarium.",
         ].map((s, i) => (
           <li key={i} className="flex gap-3">
-            <span className="font-serif italic text-gold text-lg leading-none">
-              {i + 1}.
-            </span>
+            <span className="font-serif italic text-gold text-lg leading-none">{i + 1}.</span>
             <span className="leading-snug">{s}</span>
           </li>
         ))}
@@ -270,9 +358,9 @@ function PreviewView({
         {processing && (
           <div className="absolute inset-0 bg-forest/40 backdrop-blur-sm flex flex-col items-center justify-center text-bone">
             <div className="size-16 border-2 border-bone/40 border-t-bone rounded-full animate-spin" />
-            <p className="mt-5 font-serif italic text-lg">Pressing specimen…</p>
+            <p className="mt-5 font-serif italic text-lg">Identifying & pressing…</p>
             <p className="text-[10px] uppercase tracking-[0.2em] text-bone/70 mt-1">
-              Removing background
+              This can take a few seconds
             </p>
           </div>
         )}
@@ -309,6 +397,7 @@ function NamingView({
   habitat,
   color,
   notes,
+  identification,
   onName,
   onLatin,
   onFoundAt,
@@ -327,6 +416,7 @@ function NamingView({
   habitat: string;
   color: string;
   notes: string;
+  identification: Identification | null;
   onName: (v: string) => void;
   onLatin: (v: string) => void;
   onFoundAt: (v: string) => void;
@@ -337,7 +427,6 @@ function NamingView({
   onSave: () => void;
   onRetake: () => void;
 }) {
-  const suggestions = plants.slice(0, 3);
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
 
@@ -378,32 +467,34 @@ function NamingView({
 
         <div className="rounded-2xl bg-bone border border-forest/5 p-4">
           <span className="text-[10px] uppercase tracking-[0.2em] font-semibold text-moss/60">
-            Possible matches
+            AI identification
           </span>
-          <div className="mt-3 grid gap-2">
-            {suggestions.map((plant, index) => (
-              <button
-                key={plant.id}
-                type="button"
-                onClick={() => {
-                  onName(plant.name);
-                  onLatin(plant.latin);
-                  onHabitat(plant.habitat);
-                }}
-                className="flex items-center justify-between rounded-xl bg-sage px-3 py-2 text-left border border-forest/5"
-              >
+
+          {identification?.identified ? (
+            <>
+              <div className="mt-3 flex items-center justify-between rounded-xl bg-sage px-3 py-2 border border-forest/5">
                 <span>
-                  <span className="block text-sm font-semibold">{plant.name}</span>
-                  <span className="block text-[11px] italic text-moss/70">
-                    {plant.latin}
-                  </span>
+                  <span className="block text-sm font-semibold">{identification.commonName}</span>
+                  {identification.latinName && (
+                    <span className="block text-[11px] italic text-moss/70">
+                      {identification.latinName}
+                    </span>
+                  )}
                 </span>
                 <span className="text-[10px] font-bold text-gold">
-                  {88 - index * 7}%
+                  {identification.confidence}%
                 </span>
-              </button>
-            ))}
-          </div>
+              </div>
+              {identification.funFact && (
+                <p className="mt-2 text-xs italic text-moss/60">{identification.funFact}</p>
+              )}
+              <p className="mt-2 text-[11px] text-moss/60">
+                Not right? Edit the name below before saving.
+              </p>
+            </>
+          ) : (
+            <p className="mt-2 text-sm text-moss/80">Identification details unavailable.</p>
+          )}
         </div>
 
         <label className="block">
