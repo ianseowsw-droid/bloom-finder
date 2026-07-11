@@ -1,0 +1,12 @@
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
+
+# Powers both plant identification and background removal ("pressing" a
+# specimen). Get a key at https://aistudio.google.com/apikey
+GEMINI_API_KEY=your-gemini-api-key
+
+# Only needed for the native (Capacitor) build. The native app has no server
+# of its own, so it calls the deployed web app's API routes over the network.
+# Set this to your published URL before running `bun run build:mobile`.
+# Leave unset for the web build — it uses same-origin relative requests.
+VITE_API_BASE_URL=https://your-published-project-url.example.com
