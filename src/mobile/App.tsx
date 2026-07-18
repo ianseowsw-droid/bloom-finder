@@ -24,18 +24,10 @@ import {
   useCollection,
   type Specimen,
 } from "@/lib/collection";
-import { identifyPlant, type Identification } from "@/lib/identify";
 import { formatCoords, getCurrentFieldLocation, type FieldLocation } from "@/lib/location";
 import { plants, rarityClass, type Plant } from "@/lib/plants";
 import { isAppleSignInAvailable, isSupabaseConfigured, signInWithApple } from "@/lib/supabase";
 import { loadProfile, saveProfile, type Profile } from "@/lib/profile";
-import { consumeQuota, getRemainingToday, DAILY_FREE_LIMIT } from "@/lib/quota";
-
-// The native app has no server of its own — every /api/* call must be
-// absolute, pointed at the deployed web app. Set VITE_API_BASE_URL at
-// build time (see .env.example). Falls back to same-origin for local
-// testing in a browser, where it's harmless.
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 
 type Screen =
   | { name: "field" }
@@ -325,98 +317,105 @@ function Onboarding({ onComplete }: { onComplete: (profile: Profile) => void }) 
   }
 
   return (
-    <div className="mobile-viewport mobile-safe-top bg-sage px-6 pb-10 text-forest">
-      <div className="mx-auto w-full max-w-md">
-        <div className="rounded-[2rem] bg-forest p-6 text-bone shadow-2xl shadow-forest/20">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-bone/60">
-            Account setup
-          </span>
-          <h1 className="mt-2 font-serif text-4xl font-bold italic leading-tight">
-            Create your field profile.
-          </h1>
-          <p className="mt-3 text-sm leading-relaxed text-bone/75">
-            Bloom Finder creates a secure Supabase session, then saves your herbarium, specimens,
-            and preferences to your account.
-          </p>
-        </div>
-
-        <div className="mt-6 space-y-4">
-          <Input
-            label="Display name"
-            value={displayName}
-            onChange={setDisplayName}
-            placeholder="e.g. Ian"
-            serif
-          />
-          <Input
-            label="Home region"
-            value={region}
-            onChange={setRegion}
-            placeholder="e.g. Singapore, Sydney, Pacific Northwest"
-          />
-          <Select
-            label="Experience"
-            value={experience}
-            onChange={setExperience}
-            options={["New naturalist", "Garden hobbyist", "Field recorder", "Botany pro"]}
-          />
-
-          <button
-            type="button"
-            onClick={() => setShareLocation((next) => !next)}
-            className="flex w-full items-center justify-between rounded-2xl border border-forest/5 bg-bone p-4 text-left"
-          >
-            <span>
-              <span className="block text-sm font-semibold">Location-assisted discoveries</span>
-              <span className="mt-1 block text-xs leading-relaxed text-moss/70">
-                Use GPS for specimen coordinates and future region-based plant suggestions.
-              </span>
+    <div className="mobile-viewport bg-sage">
+      <div className="mobile-scroll mobile-safe-top px-6 pb-10 text-forest">
+        <div className="mx-auto w-full max-w-md">
+          <div className="rounded-[2rem] bg-forest p-6 text-bone shadow-2xl shadow-forest/20">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-bone/60">
+              Account setup
             </span>
-            <span
-              className={
-                "ml-4 h-7 w-12 rounded-full p-1 transition " +
-                (shareLocation ? "bg-forest" : "bg-moss/20")
-              }
-            >
-              <span
-                className={
-                  "block size-5 rounded-full bg-bone transition " +
-                  (shareLocation ? "translate-x-5" : "")
-                }
-              />
-            </span>
-          </button>
+            <h1 className="mt-2 font-serif text-4xl font-bold italic leading-tight">
+              Create your field profile.
+            </h1>
+            <p className="mt-3 text-sm leading-relaxed text-bone/75">
+              Bloom Finder creates a secure Supabase session, then saves your herbarium, specimens,
+              and preferences to your account.
+            </p>
+          </div>
 
-          {error && <p className="text-sm text-red-700">{error}</p>}
+          <div className="mt-6 space-y-4">
+            <Input
+              label="Display name"
+              value={displayName}
+              onChange={setDisplayName}
+              placeholder="e.g. Ian"
+              serif
+            />
+            <Input
+              label="Home region"
+              value={region}
+              onChange={setRegion}
+              placeholder="e.g. Singapore, Sydney, Pacific Northwest"
+            />
+            <Select
+              label="Experience"
+              value={experience}
+              onChange={setExperience}
+              options={["New naturalist", "Garden hobbyist", "Field recorder", "Botany pro"]}
+            />
 
-          <button
-            type="button"
-            onClick={() => void submit()}
-            disabled={saving}
-            className="w-full rounded-2xl bg-forest py-5 text-sm font-semibold uppercase tracking-[0.15em] text-bone shadow-lg shadow-forest/20 disabled:opacity-50"
-          >
-            {saving ? "Creating profile" : "Enter Bloom Finder"}
-          </button>
-
-          {isAppleSignInAvailable() && (
             <button
               type="button"
-              onClick={() => void continueWithApple()}
-              disabled={saving}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl border border-forest/10 bg-bone py-4 text-sm font-semibold text-forest shadow-sm disabled:opacity-50"
+              onClick={() => setShareLocation((next) => !next)}
+              className="flex w-full items-center justify-between rounded-2xl border border-forest/5 bg-bone p-4 text-left"
             >
-              <svg viewBox="0 0 384 512" className="size-4" fill="currentColor" aria-hidden="true">
-                <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z" />
-              </svg>
-              Continue with Apple
+              <span>
+                <span className="block text-sm font-semibold">Location-assisted discoveries</span>
+                <span className="mt-1 block text-xs leading-relaxed text-moss/70">
+                  Use GPS for specimen coordinates and future region-based plant suggestions.
+                </span>
+              </span>
+              <span
+                className={
+                  "ml-4 h-7 w-12 rounded-full p-1 transition " +
+                  (shareLocation ? "bg-forest" : "bg-moss/20")
+                }
+              >
+                <span
+                  className={
+                    "block size-5 rounded-full bg-bone transition " +
+                    (shareLocation ? "translate-x-5" : "")
+                  }
+                />
+              </span>
             </button>
-          )}
 
-          <p className="px-2 text-center text-[11px] leading-relaxed text-moss/70">
-            {isAppleSignInAvailable()
-              ? "Sign in with Apple creates a secure Supabase session tied to your Apple ID."
-              : "This build uses Supabase anonymous auth so you can test the full account flow today."}
-          </p>
+            {error && <p className="text-sm text-red-700">{error}</p>}
+
+            <button
+              type="button"
+              onClick={() => void submit()}
+              disabled={saving}
+              className="w-full rounded-2xl bg-forest py-5 text-sm font-semibold uppercase tracking-[0.15em] text-bone shadow-lg shadow-forest/20 disabled:opacity-50"
+            >
+              {saving ? "Creating profile" : "Enter Bloom Finder"}
+            </button>
+
+            {isAppleSignInAvailable() && (
+              <button
+                type="button"
+                onClick={() => void continueWithApple()}
+                disabled={saving}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl border border-forest/10 bg-bone py-4 text-sm font-semibold text-forest shadow-sm disabled:opacity-50"
+              >
+                <svg
+                  viewBox="0 0 384 512"
+                  className="size-4"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z" />
+                </svg>
+                Continue with Apple
+              </button>
+            )}
+
+            <p className="px-2 text-center text-[11px] leading-relaxed text-moss/70">
+              {isAppleSignInAvailable()
+                ? "Sign in with Apple creates a secure Supabase session tied to your Apple ID."
+                : "This build uses Supabase anonymous auth so you can test the full account flow today."}
+            </p>
+          </div>
         </div>
       </div>
     </div>
@@ -533,10 +532,6 @@ function Capture({ go }: { go: (screen: Screen) => void }) {
   const [notes, setNotes] = useState("");
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
-  const [identifying, setIdentifying] = useState(false);
-  const [identification, setIdentification] = useState<Identification | null>(null);
-  const [captureError, setCaptureError] = useState<string | null>(null);
-  const [remaining, setRemaining] = useState(() => getRemainingToday());
   const checks = image
     ? [
         { title: "Bloom found", detail: "Flower or plant subject is visible", done: true },
@@ -552,47 +547,9 @@ function Capture({ go }: { go: (screen: Screen) => void }) {
       ];
 
   async function onFile(file: File) {
-    setCaptureError(null);
-
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error("Couldn't read that image."));
-      reader.readAsDataURL(file);
-    }).catch(() => null);
-
-    if (!dataUrl) {
-      setCaptureError("Couldn't read that image.");
-      return;
-    }
-
-    if (!consumeQuota()) {
-      setRemaining(0);
-      setCaptureError(
-        `You've used your ${DAILY_FREE_LIMIT} free identifications for today. Come back tomorrow, or upgrade for unlimited.`,
-      );
-      return;
-    }
-    setRemaining(getRemainingToday());
-
-    setIdentifying(true);
-    const result = await identifyPlant(dataUrl, API_BASE);
-    setIdentifying(false);
-
-    if (!result || !result.identified) {
-      setIdentification(null);
-      setCaptureError(
-        "We couldn't recognize this plant. Try a clearer, closer photo of a single flower.",
-      );
-      return;
-    }
-
-    setIdentification(result);
-    setName(result.commonName ?? "");
-    setLatin(result.latinName ?? "");
-    if (result.color) setColor(result.color);
-    if (result.habitat) setHabitat(result.habitat);
-    setImage(dataUrl);
+    const reader = new FileReader();
+    reader.onload = () => setImage(String(reader.result));
+    reader.readAsDataURL(file);
   }
 
   async function useGps() {
@@ -620,15 +577,13 @@ function Capture({ go }: { go: (screen: Screen) => void }) {
       locationAccuracy: fieldLocation?.accuracy,
       habitat: habitat.trim(),
       color: color.trim(),
-      confidence: identification?.confidence,
+      confidence: latin.trim() ? 82 : undefined,
       tags: [color.trim(), habitat.trim()].filter(Boolean),
       notes: notes.trim(),
       image,
     });
     go({ name: "specimen", id: item.id });
   }
-
-  const quotaExhausted = remaining <= 0 && !image;
 
   return (
     <>
@@ -687,38 +642,17 @@ function Capture({ go }: { go: (screen: Screen) => void }) {
                 className="absolute inset-0 h-full w-full object-cover opacity-55 blur-[1px]"
               />
               <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/45" />
-
-              {identifying ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-forest/50 backdrop-blur-sm">
-                  <div className="size-14 animate-spin rounded-full border-2 border-bone/40 border-t-bone" />
-                  <p className="mt-4 font-serif text-lg italic">Identifying…</p>
-                </div>
-              ) : quotaExhausted ? (
-                <div className="absolute left-6 right-6 top-16 rounded-3xl border border-bone/20 bg-bone/10 p-5 text-center backdrop-blur-md">
-                  <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-gold">
-                    Daily limit reached
-                  </span>
-                  <h2 className="mt-2 font-serif text-3xl font-bold italic leading-tight">
-                    That's {DAILY_FREE_LIMIT} for today.
-                  </h2>
-                  <p className="mt-3 text-sm leading-relaxed text-bone/75">
-                    Come back tomorrow, or upgrade for unlimited plant ID.
-                  </p>
-                </div>
-              ) : (
-                <div className="absolute left-6 right-6 top-16 rounded-3xl border border-bone/20 bg-bone/10 p-5 text-center backdrop-blur-md">
-                  <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-gold">
-                    Live guide
-                  </span>
-                  <h2 className="mt-2 font-serif text-3xl font-bold italic leading-tight">
-                    Spot a bloom in the real world.
-                  </h2>
-                  <p className="mt-3 text-sm leading-relaxed text-bone/75">
-                    Open the camera and frame the plant — we'll identify it on the spot.
-                  </p>
-                </div>
-              )}
-
+              <div className="absolute left-6 right-6 top-16 rounded-3xl border border-bone/20 bg-bone/10 p-5 text-center backdrop-blur-md">
+                <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-gold">
+                  Live guide
+                </span>
+                <h2 className="mt-2 font-serif text-3xl font-bold italic leading-tight">
+                  Spot a bloom in the real world.
+                </h2>
+                <p className="mt-3 text-sm leading-relaxed text-bone/75">
+                  Open the camera, frame the plant, then turn it into a collectible specimen card.
+                </p>
+              </div>
               <div className="pointer-events-none absolute inset-8">
                 <span className="absolute left-0 top-16 h-16 w-16 border-l-2 border-t-2 border-gold" />
                 <span className="absolute right-0 top-16 h-16 w-16 border-r-2 border-t-2 border-gold" />
@@ -727,22 +661,20 @@ function Capture({ go }: { go: (screen: Screen) => void }) {
               </div>
               <div className="absolute bottom-5 left-5 rounded-2xl border border-bone/20 bg-bone px-4 py-3 text-forest shadow-xl">
                 <span className="text-xs font-bold uppercase tracking-[0.18em] text-gold">
-                  {remaining} / {DAILY_FREE_LIMIT} tries
+                  3 / 3 tries
                 </span>
               </div>
               <div className="absolute bottom-5 right-5 flex flex-col gap-2">
                 <button
                   onClick={() => fileRef.current?.click()}
-                  disabled={identifying || quotaExhausted}
-                  className="grid size-14 place-items-center rounded-full bg-gold text-forest shadow-xl active:scale-95 disabled:opacity-40"
+                  className="grid size-14 place-items-center rounded-full bg-gold text-forest shadow-xl active:scale-95"
                   aria-label="Open camera"
                 >
                   <Camera className="size-6" strokeWidth={1.75} />
                 </button>
                 <button
                   onClick={() => fileRef.current?.click()}
-                  disabled={identifying || quotaExhausted}
-                  className="grid size-11 place-items-center rounded-full border border-bone/20 bg-bone/90 text-forest shadow-lg active:scale-95 disabled:opacity-40"
+                  className="grid size-11 place-items-center rounded-full border border-bone/20 bg-bone/90 text-forest shadow-lg active:scale-95"
                   aria-label="Choose from library"
                 >
                   <ImagePlus className="size-5" strokeWidth={1.75} />
@@ -750,23 +682,15 @@ function Capture({ go }: { go: (screen: Screen) => void }) {
               </div>
             </section>
 
-            {captureError ? (
-              <div className="rounded-3xl border border-bone/10 bg-bone/10 p-4 backdrop-blur-md">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gold">
-                  {quotaExhausted ? "Limit reached" : "Not recognized"}
-                </span>
-                <p className="mt-2 text-sm leading-relaxed text-bone/75">{captureError}</p>
-              </div>
-            ) : (
-              <div className="rounded-3xl border border-bone/10 bg-bone/10 p-4 backdrop-blur-md">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-bone/50">
-                  How capture works
-                </span>
-                <p className="mt-2 text-sm leading-relaxed text-bone/75">
-                  Snap a photo — we identify the species, then you confirm and add field notes.
-                </p>
-              </div>
-            )}
+            <div className="rounded-3xl border border-bone/10 bg-bone/10 p-4 backdrop-blur-md">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-bone/50">
+                How capture works
+              </span>
+              <p className="mt-2 text-sm leading-relaxed text-bone/75">
+                This build opens the native iPhone camera. The live AI guide and plant visibility
+                checks can be connected next.
+              </p>
+            </div>
           </div>
         ) : (
           <div className="space-y-4">
@@ -798,7 +722,7 @@ function Capture({ go }: { go: (screen: Screen) => void }) {
                 <span className="absolute bottom-24 right-0 h-14 w-14 border-b-2 border-r-2 border-gold" />
               </div>
               <span className="absolute left-4 top-4 rounded-full border border-bone/20 bg-bone/90 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-forest backdrop-blur">
-                {identification ? `Identified · ${identification.confidence}%` : "Plant found"}
+                Plant found
               </span>
               <div className="absolute inset-x-5 bottom-5 rounded-3xl border border-bone/20 bg-bone p-5 text-forest shadow-2xl">
                 <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-gold">
@@ -817,11 +741,7 @@ function Capture({ go }: { go: (screen: Screen) => void }) {
                   </span>
                   <button
                     type="button"
-                    onClick={() => {
-                      setImage(null);
-                      setIdentification(null);
-                      setCaptureError(null);
-                    }}
+                    onClick={() => setImage(null)}
                     className="text-[10px] font-bold uppercase tracking-wider text-gold"
                   >
                     Retake
@@ -831,34 +751,6 @@ function Capture({ go }: { go: (screen: Screen) => void }) {
             </div>
 
             <div className="space-y-4 rounded-[2rem] bg-sage p-4 text-forest">
-              {identification?.identified && (
-                <div className="rounded-2xl border border-forest/5 bg-bone p-4 shadow-sm">
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-moss/60">
-                    AI identification
-                  </span>
-                  <div className="mt-2 flex items-center justify-between">
-                    <span>
-                      <span className="block text-sm font-semibold">
-                        {identification.commonName}
-                      </span>
-                      {identification.latinName && (
-                        <span className="block text-[11px] italic text-moss/70">
-                          {identification.latinName}
-                        </span>
-                      )}
-                    </span>
-                    <span className="text-[10px] font-bold text-gold">
-                      {identification.confidence}%
-                    </span>
-                  </div>
-                  {identification.funFact && (
-                    <p className="mt-2 text-xs italic text-moss/60">{identification.funFact}</p>
-                  )}
-                  <p className="mt-2 text-[11px] text-moss/60">
-                    Not right? Edit the name below before saving.
-                  </p>
-                </div>
-              )}
               <div className="rounded-2xl border border-forest/5 bg-bone p-4 shadow-sm">
                 <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-moss/60">
                   Storage
@@ -942,11 +834,7 @@ function Capture({ go }: { go: (screen: Screen) => void }) {
               </label>
               <div className="grid grid-cols-[auto_1fr] gap-3 pt-2">
                 <button
-                  onClick={() => {
-                    setImage(null);
-                    setIdentification(null);
-                    setCaptureError(null);
-                  }}
+                  onClick={() => setImage(null)}
                   className="rounded-2xl border border-forest/5 bg-bone px-5 text-xs font-semibold uppercase tracking-wider text-forest"
                 >
                   Retake
